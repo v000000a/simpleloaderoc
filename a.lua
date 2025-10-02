@@ -1,5 +1,5 @@
 -- touchos_installer.lua
--- TouchOS Installer - Полнофункциональная ОС для планшетов
+-- TouchOS Installer - Стабильная версия
 
 local component = require("component")
 local computer = require("computer")
@@ -24,17 +24,16 @@ local TouchOS = {
   }
 }
 
--- === СИСТЕМНЫЕ ФУНКЦИИ === --
+-- === БЕЗОПАСНЫЕ ФУНКЦИИ === --
 
--- Безопасная загрузка файла
 local function safeLoad(path)
   if not filesystem.exists(path) then
-    return nil, "File not found: " .. path
+    return nil, "Файл не найден: " .. path
   end
   
-  local file = io.open(path, "r")
+  local file, err = io.open(path, "r")
   if not file then
-    return nil, "Cannot open: " .. path
+    return nil, "Не удалось открыть: " .. path .. " - " .. tostring(err)
   end
   
   local content = file:read("*a")
@@ -42,11 +41,16 @@ local function safeLoad(path)
   return content
 end
 
--- Безопасное сохранение файла
 local function safeSave(path, content)
-  local file = io.open(path, "w")
+  -- Создаем директорию если нужно
+  local dir = path:match("(.+)/[^/]+$")
+  if dir and not filesystem.exists(dir) then
+    filesystem.makeDirectory(dir)
+  end
+  
+  local file, err = io.open(path, "w")
   if not file then
-    return false, "Cannot write: " .. path
+    return false, "Не удалось записать: " .. path .. " - " .. tostring(err)
   end
   
   file:write(content)
@@ -54,7 +58,6 @@ local function safeSave(path, content)
   return true
 end
 
--- Создание директории с проверкой
 local function mkdir(path)
   if not filesystem.exists(path) then
     return filesystem.makeDirectory(path)
@@ -67,12 +70,10 @@ end
 local function checkCompatibility()
   local issues = {}
   
-  -- Проверка памяти
   if computer.totalMemory() < 524288 then
     table.insert(issues, "❌ Требуется минимум 512KB памяти")
   end
   
-  -- Проверка диска
   local mainFs = component.list("filesystem")()
   if not mainFs then
     table.insert(issues, "❌ Не найден загрузочный диск")
@@ -83,7 +84,6 @@ local function checkCompatibility()
     end
   end
   
-  -- Проверка GPU
   if not component.isAvailable("gpu") then
     table.insert(issues, "❌ Требуется видеокарта")
   end
@@ -98,14 +98,14 @@ local function createStructure()
   
   local directories = {
     "/system",
-    "/system/kernel",
+    "/system/kernel", 
     "/system/ui",
     "/system/apps",
     "/system/lib",
     "/system/config",
     "/user",
     "/user/documents",
-    "/user/downloads",
+    "/user/downloads", 
     "/user/pictures",
     "/user/music",
     "/apps",
@@ -133,9 +133,20 @@ local function installKernel()
 local component = require("component")
 local computer = require("computer")
 local event = require("event")
-local gpu = component.gpu
+
+-- Безопасная загрузка файла
+local function safeLoad(path)
+  local filesystem = require("filesystem")
+  if not filesystem.exists(path) then return nil end
+  local file = io.open(path, "r")
+  if not file then return nil end
+  local content = file:read("*a")
+  file:close()
+  return content
+end
 
 -- Инициализация дисплея
+local gpu = component.gpu
 if gpu then
   local w, h = gpu.getResolution()
   gpu.setBackground(0x2C3E50)
@@ -146,27 +157,16 @@ end
 
 computer.beep(800, 0.1)
 
--- Проверка системных файлов
-local function fileExists(path)
-  return pcall(function() return require("filesystem").exists(path) end)
-end
-
-if not fileExists("/system/kernel/init.lua") then
-  if gpu then
-    gpu.setBackground(0xE74C3C)
-    gpu.fill(1, 1, 80, 25, " ")
-    gpu.set(10, 10, "❌ Ошибка: Системные файлы повреждены")
-  end
-  computer.beep(200, 2)
-  return
-end
-
 -- Загрузка ядра
-local success, err = pcall(dofile, "/system/kernel/init.lua")
+local success, err = pcall(function()
+  dofile("/system/kernel/init.lua")
+end)
+
 if not success then
   if gpu then
     gpu.setBackground(0xE74C3C)
     gpu.fill(1, 1, 80, 25, " ")
+    gpu.setForeground(0xFFFFFF)
     gpu.set(10, 10, "❌ Ошибка загрузки:")
     gpu.set(10, 11, tostring(err))
   end
@@ -183,13 +183,22 @@ print("✅ TouchOS успешно загружена")
 local component = require("component")
 local computer = require("computer")
 local event = require("event")
-local gpu = component.gpu
 local filesystem = require("filesystem")
+local serialization = require("serialization")
 
--- Системные переменные
+-- Глобальная таблица системы
 TouchOS = {
-  version = "]] .. TouchOS.version .. [[",
-  theme = ]] .. serialization.serialize(TouchOS.theme) .. [[,
+  version = "2.0",
+  theme = {
+    primary = 0x2C3E50,
+    secondary = 0x3498DB, 
+    accent = 0xE74C3C,
+    background = 0xECF0F1,
+    text = 0x2C3E50,
+    success = 0x27AE60,
+    warning = 0xF39C12,
+    error = 0xE74C3C
+  },
   apps = {},
   settings = {
     brightness = 80,
@@ -203,8 +212,8 @@ TouchOS = {
 function TouchOS.installApp(name, path, icon, category)
   TouchOS.apps[name] = {
     path = path,
-    icon = icon,
-    category = category,
+    icon = icon or "📱",
+    category = category or "other",
     name = name
   }
 end
@@ -244,18 +253,14 @@ function TouchOS.reboot()
   computer.shutdown(true)
 end
 
--- Загрузка системных приложений
-print("⚡ Инициализируем TouchOS " .. TouchOS.version .. "...")
+-- Регистрация системных приложений
+print("⚡ Инициализируем TouchOS 2.0...")
 
--- Регистрируем системные приложения
 TouchOS.installApp("launcher", "/system/ui/launcher.lua", "🏠", "system")
-TouchOS.installApp("settings", "/system/apps/settings.lua", "⚙️", "system")
+TouchOS.installApp("settings", "/system/apps/settings.lua", "⚙️", "system") 
 TouchOS.installApp("files", "/system/apps/files.lua", "📁", "tools")
 TouchOS.installApp("calculator", "/system/apps/calculator.lua", "🧮", "tools")
 TouchOS.installApp("notes", "/system/apps/notes.lua", "📝", "tools")
-TouchOS.installApp("camera", "/system/apps/camera.lua", "📷", "media")
-TouchOS.installApp("music", "/system/apps/music.lua", "🎵", "media")
-TouchOS.installApp("browser", "/system/apps/browser.lua", "🌐", "internet")
 
 -- Запускаем лаунчер
 print("🚀 Запускаем лаунчер...")
@@ -272,9 +277,7 @@ local component = require("component")
 local computer = require("computer")
 local event = require("event")
 local gpu = component.gpu
-local filesystem = require("filesystem")
 
--- Проверка GPU
 if not gpu then
   print("❌ Требуется видеокарта для лаунчера")
   return
@@ -325,8 +328,10 @@ function Launcher:setupPages()
     table.insert(appList, app)
   end
   
-  -- Сортируем приложения по категориям
-  table.sort(appList, function(a, b) return a.name < b.name end)
+  -- Сортируем приложения по имени
+  table.sort(appList, function(a, b) 
+    return (a.name or "") < (b.name or "")
+  end)
   
   -- Разбиваем на страницы
   self.pages = {}
@@ -360,16 +365,18 @@ function Launcher:drawHomeScreen()
   local rows = 2
   local buttonWidth = math.floor(screenWidth / cols) - 2
   local buttonHeight = 4
-  
+
   for i, app in ipairs(page) do
-    local col = (i - 1) % cols
-    local row = math.floor((i - 1) / cols)
-    local x = col * (buttonWidth + 1) + 2
-    local y = row * (buttonHeight + 1) + 3
-    
-    local button = Button:new(x, y, buttonWidth, buttonHeight, app.name, app.icon)
-    button:draw()
-    app.button = button
+    if app then
+      local col = (i - 1) % cols
+      local row = math.floor((i - 1) / cols)
+      local x = col * (buttonWidth + 1) + 2
+      local y = row * (buttonHeight + 1) + 3
+      
+      local button = Button:new(x, y, buttonWidth, buttonHeight, app.name, app.icon)
+      button:draw()
+      app.button = button
+    end
   end
   
   -- Индикатор страниц
@@ -390,20 +397,23 @@ function Launcher:handleTouch(x, y)
   local page = self.pages[self.currentPage] or {}
   
   for _, app in ipairs(page) do
-    if app.button and app.button:contains(x, y) then
+    if app and app.button and app.button:contains(x, y) then
       computer.beep(1200, 0.1)
-      TouchOS.launchApp(app.name)
+      local success, err = TouchOS.launchApp(app.name)
+      if not success then
+        print("Ошибка запуска: " .. tostring(err))
+      end
       return true
     end
   end
   
-  -- Проверка свайпов
-  if y == screenHeight - 1 then
+  -- Проверка свайпов по индикатору страниц
+  if y == screenHeight - 1 and #self.pages > 1 then
     local dotsWidth = #self.pages * 2 - 1
     local dotsX = math.floor((screenWidth - dotsWidth) / 2)
     
     for i = 1, #self.pages do
-      if x >= dotsX + (i-1)*2 and x <= dotsX + (i-1)*2 then
+      if x >= dotsX + (i-1)*2 and x <= dotsX + (i-1)*2 + 1 then
         if i ~= self.currentPage then
           self.currentPage = i
           computer.beep(800, 0.1)
@@ -440,15 +450,22 @@ function Launcher:run()
 end
 
 -- Запуск лаунчера
-Launcher:run()
+local success, err = pcall(function() 
+  Launcher:run() 
+end)
+
+if not success then
+  print("❌ Ошибка в лаунчере: " .. tostring(err))
+end
 ]]
   }
   
   for path, content in pairs(kernelFiles) do
-    if safeSave(path, content) then
+    local ok, err = safeSave(path, content)
+    if ok then
       print("   ✅ " .. path)
     else
-      print("   ❌ " .. path)
+      print("   ❌ " .. path .. ": " .. tostring(err))
     end
   end
 end
@@ -465,15 +482,18 @@ local component = require("component")
 local computer = require("computer")
 local event = require("event")
 local gpu = component.gpu
-local serialization = require("serialization")
+
+if not gpu then
+  print("❌ Требуется видеокарта")
+  return
+end
 
 local Settings = {
   running = true,
   options = {
     {"Яркость", "brightness", 80, 0, 100},
     {"Громкость", "volume", 70, 0, 100},
-    {"Обои", "wallpaper", 1, 1, 3},
-    {"Язык", "language", "ru", {"ru", "en"}}
+    {"Обои", "wallpaper", 1, 1, 3}
   }
 }
 
@@ -501,18 +521,20 @@ function Settings:draw()
     local y = 5 + i * 2
     gpu.setForeground(TouchOS.theme.text)
     gpu.set(3, y, option[1] .. ":")
-    gpu.set(15, y, tostring(TouchOS.settings[option[2]]))
+    gpu.set(20, y, tostring(TouchOS.settings[option[2]]))
     
     -- Ползунок для числовых настроек
     if option[4] and option[5] then
-      local sliderWidth = 20
+      local sliderWidth = 30
       local value = (TouchOS.settings[option[2]] - option[4]) / (option[5] - option[4])
       local fillWidth = math.floor(sliderWidth * value)
       
       gpu.setBackground(0xCCCCCC)
-      gpu.fill(20, y, sliderWidth, 1, " ")
+      gpu.fill(25, y, sliderWidth, 1, " ")
       gpu.setBackground(TouchOS.theme.success)
-      gpu.fill(20, y, fillWidth, 1, " ")
+      if fillWidth > 0 then
+        gpu.fill(25, y, fillWidth, 1, " ")
+      end
     end
   end
 end
@@ -530,8 +552,8 @@ function Settings:handleTouch(x, y)
   -- Обработка настроек
   for i, option in ipairs(self.options) do
     local settingY = 5 + i * 2
-    if y == settingY and x >= 20 and x <= 40 and option[4] and option[5] then
-      local value = math.floor(((x - 20) / 20) * (option[5] - option[4]) + option[4])
+    if y == settingY and x >= 25 and x <= 55 and option[4] and option[5] then
+      local value = math.floor(((x - 25) / 30) * (option[5] - option[4]) + option[4])
       TouchOS.settings[option[2]] = math.max(option[4], math.min(option[5], value))
       computer.beep(800 + i * 100, 0.1)
       return true
@@ -545,13 +567,18 @@ function Settings:run()
   while self.running do
     self:draw()
     local e, _, x, y = event.pull("touch")
-    self:handleTouch(x, y)
+    if e == "touch" then
+      self:handleTouch(x, y)
+    end
   end
 end
 
 -- Запуск приложения
 print("⚙️  Запускаем настройки...")
-Settings:run()
+local success, err = pcall(function() Settings:run() end)
+if not success then
+  print("❌ Ошибка в настройках: " .. tostring(err))
+end
 ]],
 
     ["/system/apps/files.lua"] = [[
@@ -561,6 +588,11 @@ local computer = require("computer")
 local event = require("event")
 local gpu = component.gpu
 local filesystem = require("filesystem")
+
+if not gpu then
+  print("❌ Требуется видеокарта")
+  return
+end
 
 local FileManager = {
   running = true,
@@ -597,27 +629,35 @@ function FileManager:draw()
   
   -- Родительская директория
   if self.currentPath ~= "/" then
-    gpu.set(3, y, "📂 ..")
-    y = y + 1
-  end
-  
-  local list = filesystem.list(self.currentPath)
-  for item in list do
-    local fullPath = filesystem.concat(self.currentPath, item)
-    local icon = filesystem.isDirectory(fullPath) and "📁" or "📄"
-    
-    if self.selectedFile == fullPath then
+    if self.selectedFile == ".." then
       gpu.setBackground(TouchOS.theme.secondary)
       gpu.fill(2, y, w - 2, 1, " ")
     else
       gpu.setBackground(TouchOS.theme.background)
     end
-    
-    gpu.setForeground(TouchOS.theme.text)
-    gpu.set(3, y, icon .. " " .. item)
+    gpu.set(3, y, "📂 ..")
     y = y + 1
-    
-    if y >= h - 2 then break end
+  end
+  
+  local list = filesystem.list(self.currentPath)
+  if list then
+    for item in list do
+      local fullPath = filesystem.concat(self.currentPath, item)
+      local icon = filesystem.isDirectory(fullPath) and "📁" or "📄"
+      
+      if self.selectedFile == fullPath then
+        gpu.setBackground(TouchOS.theme.secondary)
+        gpu.fill(2, y, w - 2, 1, " ")
+      else
+        gpu.setBackground(TouchOS.theme.background)
+      end
+      
+      gpu.setForeground(TouchOS.theme.text)
+      gpu.set(3, y, icon .. " " .. item)
+      y = y + 1
+      
+      if y >= h - 2 then break end
+    end
   end
 end
 
@@ -654,20 +694,22 @@ function FileManager:handleTouch(x, y)
     end
     
     local list = filesystem.list(self.currentPath)
-    local i = 0
-    for item in list do
-      if i == itemIndex then
-        local fullPath = filesystem.concat(self.currentPath, item)
-        if filesystem.isDirectory(fullPath) then
-          self.currentPath = fullPath
-          computer.beep(1200, 0.1)
-        else
-          self.selectedFile = fullPath
-          computer.beep(900, 0.1)
+    if list then
+      local i = 0
+      for item in list do
+        if i == itemIndex then
+          local fullPath = filesystem.concat(self.currentPath, item)
+          if filesystem.isDirectory(fullPath) then
+            self.currentPath = fullPath
+            computer.beep(1200, 0.1)
+          else
+            self.selectedFile = fullPath
+            computer.beep(900, 0.1)
+          end
+          return true
         end
-        return true
+        i = i + 1
       end
-      i = i + 1
     end
   end
   
@@ -678,12 +720,17 @@ function FileManager:run()
   while self.running do
     self:draw()
     local e, _, x, y = event.pull("touch")
-    self:handleTouch(x, y)
+    if e == "touch" then
+      self:handleTouch(x, y)
+    end
   end
 end
 
 print("📁 Запускаем файловый менеджер...")
-FileManager:run()
+local success, err = pcall(function() FileManager:run() end)
+if not success then
+  print("❌ Ошибка в файловом менеджере: " .. tostring(err))
+end
 ]],
 
     ["/system/apps/calculator.lua"] = [[
@@ -692,6 +739,11 @@ local component = require("component")
 local computer = require("computer")
 local event = require("event")
 local gpu = component.gpu
+
+if not gpu then
+  print("❌ Требуется видеокарта")
+  return
+end
 
 local Calculator = {
   running = true,
@@ -711,7 +763,8 @@ function Calculator:draw()
   gpu.setBackground(0x2C3E50)
   gpu.fill(2, 2, w - 2, 3, " ")
   gpu.setForeground(0xFFFFFF)
-  gpu.set(w - #self.display - 2, 3, self.display)
+  local displayText = #self.display > w - 6 and self.display:sub(-w + 7) or self.display
+  gpu.set(w - #displayText - 2, 3, displayText)
   
   -- Кнопки
   local buttons = {
@@ -772,13 +825,16 @@ function Calculator:handleInput(button)
     if self.operator and not self.waiting then
       self:handleInput("=")
     end
-    self.memory = self.display
+    self.memory = tonumber(self.display) or 0
     self.operator = button
     self.waiting = true
   end
 end
 
 function Calculator:calculate(a, b, op)
+  a = tonumber(a) or 0
+  b = tonumber(b) or 0
+  
   if op == "+" then return a + b
   elseif op == "-" then return a - b
   elseif op == "×" then return a * b
@@ -794,6 +850,10 @@ function Calculator:run()
     
     local e, _, x, y = event.pull("touch")
     if e == "touch" then
+      local w, h = gpu.getResolution()
+      local buttonWidth = math.floor((w - 6) / 4)
+      local buttonHeight = 2
+      
       local buttons = {
         {"C", "±", "%", "÷"},
         {"7", "8", "9", "×"},
@@ -801,9 +861,6 @@ function Calculator:run()
         {"1", "2", "3", "+"},
         {"0", "", ".", "="}
       }
-      
-      local buttonWidth = math.floor((gpu.getResolution() - 6) / 4)
-      local buttonHeight = 2
       
       for row, rowButtons in ipairs(buttons) do
         for col, btn in ipairs(rowButtons) do
@@ -825,7 +882,10 @@ function Calculator:run()
 end
 
 print("🧮 Запускаем калькулятор...")
-Calculator:run()
+local success, err = pcall(function() Calculator:run() end)
+if not success then
+  print("❌ Ошибка в калькуляторе: " .. tostring(err))
+end
 ]],
 
     ["/system/apps/notes.lua"] = [[
@@ -835,24 +895,24 @@ local computer = require("computer")
 local event = require("event")
 local gpu = component.gpu
 local filesystem = require("filesystem")
+local serialization = require("serialization")
+
+if not gpu then
+  print("❌ Требуется видеокарта")
+  return
+end
 
 local Notes = {
   running = true,
-  notes = {},
+  notes = {"Новая заметка 1"},
   currentNote = 1,
   editing = false
 }
 
 function Notes:loadNotes()
-  if filesystem.exists("/user/notes.dat") then
-    local content = safeLoad("/user/notes.dat")
-    if content then
-      self.notes = serialization.unserialize(content) or {}
-    end
-  end
-  
-  if #self.notes == 0 then
-    table.insert(self.notes, "Новая заметка")
+  local content = safeLoad("/user/notes.dat")
+  if content then
+    self.notes = serialization.unserialize(content) or {"Новая заметка 1"}
   end
 end
 
@@ -894,18 +954,21 @@ function Notes:draw()
       else
         gpu.setBackground(TouchOS.theme.background)
       end
-      gpu.set(3, y, "📄 " .. (note:sub(1, 30) .. (#note > 30 and "..." or "")))
+      local displayText = note:gsub("\n", " "):sub(1, 30)
+      if #note > 30 then displayText = displayText .. "..." end
+      gpu.set(3, y, "📄 " .. displayText)
     end
   else
     -- Редактор заметки
     gpu.setForeground(TouchOS.theme.text)
-    gpu.set(3, 5, "Редактирование:")
+    gpu.set(3, 5, "Редактирование (ESC для сохранения):")
     
     local noteText = self.notes[self.currentNote] or ""
     local lines = {}
     for line in noteText:gmatch("[^\n]+") do
       table.insert(lines, line)
     end
+    if #lines == 0 then lines = {""} end
     
     for i, line in ipairs(lines) do
       if 7 + i <= h - 2 then
@@ -961,15 +1024,19 @@ function Notes:run()
 end
 
 print("📝 Запускаем заметки...")
-Notes:run()
+local success, err = pcall(function() Notes:run() end)
+if not success then
+  print("❌ Ошибка в заметках: " .. tostring(err))
+end
 ]]
   }
   
   for path, content in pairs(apps) do
-    if safeSave(path, content) then
+    local ok, err = safeSave(path, content)
+    if ok then
       print("   ✅ " .. path)
     else
-      print("   ❌ " .. path)
+      print("   ❌ " .. path .. ": " .. tostring(err))
     end
   end
 end
@@ -984,19 +1051,15 @@ local function installConfigs()
       {name = "Градиент синий", color1 = 0x3498DB, color2 = 0x2C3E50},
       {name = "Зеленый лес", color1 = 0x27AE60, color2 = 0x16A085},
       {name = "Фиолетовый", color1 = 0x9B59B6, color2 = 0x8E44AD}
-    }),
-    
-    ["/system/config/default.conf"] = serialization.serialize({
-      theme = TouchOS.theme,
-      language = "ru",
-      animations = true,
-      sound = true
     })
   }
   
   for path, content in pairs(configs) do
-    if safeSave(path, content) then
+    local ok, err = safeSave(path, content)
+    if ok then
       print("   ⚙️  " .. path)
+    else
+      print("   ❌ " .. path .. ": " .. tostring(err))
     end
   end
 end
@@ -1004,6 +1067,11 @@ end
 -- === ГРАФИЧЕСКИЙ УСТАНОВЩИК === --
 
 local function showGraphicalInstaller()
+  if not component.isAvailable("gpu") then
+    print("❌ Требуется видеокарта для графического установщика")
+    return false
+  end
+  
   local w, h = gpu.getResolution()
   
   local function drawScreen(title, message, progress)
@@ -1026,7 +1094,9 @@ local function showGraphicalInstaller()
       gpu.setBackground(0x34495E)
       gpu.fill(barX, 8, barWidth, 2, " ")
       gpu.setBackground(TouchOS.theme.success)
-      gpu.fill(barX, 8, fillWidth, 2, " ")
+      if fillWidth > 0 then
+        gpu.fill(barX, 8, fillWidth, 2, " ")
+      end
       
       local percent = math.floor(progress * 100)
       gpu.setForeground(0xFFFFFF)
@@ -1096,11 +1166,21 @@ end
 print("TouchOS Installer v" .. TouchOS.version)
 print("================================")
 
-if component.isAvailable("gpu") then
-  local success = showGraphicalInstaller()
-  if not success then
-    print("❌ Установка прервана из-за ошибки")
+local function main()
+  if component.isAvailable("gpu") then
+    local success = showGraphicalInstaller()
+    if not success then
+      print("❌ Установка прервана из-за ошибки")
+    else
+      print("✅ Установка завершена успешно!")
+    end
+  else
+    print("❌ Требуется видеокарта для установки")
   end
-else
-  print("❌ Требуется видеокарта для установки")
+end
+
+-- Запуск с обработкой ошибок
+local success, err = pcall(main)
+if not success then
+  print("❌ Критическая ошибка установщика: " .. tostring(err))
 end
