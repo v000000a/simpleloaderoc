@@ -1,21 +1,29 @@
--- Recovery Menu
-local gpu = component.proxy(component.list("gpu")())
+-- Minimal GUI Recovery Loader 2025 (English)
+-- Requests system APIs explicitly → no nil crashes
+
+-- 1) Ask the system for APIs
+local component = require("component")
+local computer  = require("computer")
+local gpu       = component.proxy(component.list("gpu")())
+local event     = require("event")
+
+-- 2) Screen init
 local w, h = gpu.maxResolution()
 gpu.setResolution(w, h)
 gpu.fill(1, 1, w, h, " ")
 
--- colours
-local bg = 0x2C2C2C
-local fg = 0xFFFFFF
-local accent = 0x007AFF
-local red = 0xFF3B30
+-- 3) Colours (2025 minimal)
+local bg    = 0x1A1A1A
+local fg    = 0xFFFFFF
+local bar   = 0x00AA00
+local red   = 0xFF3B30
 local green = 0x34C759
 
 gpu.setBackground(bg)
 gpu.setForeground(fg)
 gpu.fill(1, 1, w, h, " ")
 
--- GUI helpers
+-- 4) Helpers
 local function center(text, y)
   local x = math.floor((w - #text) / 2) + 1
   gpu.set(x, y, text)
@@ -30,80 +38,76 @@ local function button(text, x, y, w, h, bgC, fgC)
 end
 
 local function inside(px, py, btn)
-  return px >= btn.x and px <= btn.x + btn.w - 1 and py >= btn.y and py <= btn.y + btn.h - 1
+  return px >= btn.x and px <= btn.x + btn.w - 1 and
+         py >= btn.y and py <= btn.y + btn.h - 1
 end
 
--- disks list
+-- 5) Disk list
 local function listDisks()
   local disks = {}
   for addr, _ in component.list("filesystem") do
-    table.insert(disks, {addr = addr, label = component.invoke(addr, "getLabel") or "Unlabeled"})
+    table.insert(disks, {
+      addr  = addr,
+      label = component.invoke(addr, "getLabel") or "Unlabeled"
+    })
   end
   return disks
 end
 
--- file manager (simple)
+-- 6) File manager (simple GUI)
 local function fileManager(diskAddr)
   local path = "/"
-  local function drawPath()
-    gpu.setBackground(bg)
-    gpu.setForeground(accent)
-    gpu.fill(1, 3, w, 1, " ")
-    gpu.set(2, 3, "Path: " .. path)
-  end
-  local function drawFiles()
-    gpu.setBackground(bg)
-    gpu.fill(1, 5, w, h - 5, " ")
+  while true do
+    gpu.setBackground(0x1A1A1A)
+    gpu.fill(1, 3, w, h - 3, " ")
+    center("File Manager: " .. path, 3)
+
     local list = component.invoke(diskAddr, "list", path)
     local y = 5
     for name in list do
       gpu.set(2, y, name)
       y = y + 1
     end
-  end
-  drawPath(); drawFiles()
-  -- simplified control (Enter = return)
-  while true do
-    local _, _, char = event.pull("key")
-    if char == 13 then break end
+
+    -- touch to exit
+    local _, _, x, y = event.pull("touch")
+    if y > h - 3 then break end
   end
 end
 
--- disk wiping
+-- 7) Wipe disk
 local function wipeDisk(addr)
-  gpu.setForeground(red)
   center("Wiping disk " .. addr:sub(1, 8) .. "...", h - 2)
-  component.invoke(addr, "remove", "/") -- wiping root
-  gpu.setForeground(green)
+  component.invoke(addr, "remove", "/")
   center("Wiped!", h - 2)
   os.sleep(1)
 end
 
--- load openos from disk
-local function loadOpenOSFromDisk()
-  local addr = computer.getBootAddress()
+-- 8) Boot OpenOS from this disk
+local function bootOpenOS()
   local ok, err = pcall(function()
     local boot = loadfile("/lib/core/boot.lua")
     boot(loadfile)
   end)
   if not ok then
-    gpu.setForeground(red)
+    gpu.setForeground(0xFF0000)
     center("Boot failed: " .. tostring(err), h - 2)
     os.sleep(2)
+    computer.shutdown(true)
   end
 end
 
--- main menu
+-- 9) Main menu (GUI)
 local function mainMenu()
   while true do
-    gpu.setBackground(bg)
+    gpu.setBackground(0x1A1A1A)
     gpu.fill(1, 1, w, h, " ")
-    center("Recovery Menu", 3)
+    center("Recovery Menu 2025", 3)
 
-    local btn1 = button("File Manager", 10, 8, 25, 3, accent, white)
-    local btn2 = button("Wipe Disk", 10, 13, 25, 3, red, white)
-    local btn3 = button("Load OpenOS", 10, 18, 25, 3, green, white)
-    local btn4 = button("Exit", 10, 23, 25, 3, bg, white)
+    local btn1 = button("File Manager", 10, 8, 25, 3, 0x007AFF, 0xFFFFFF)
+    local btn2 = button("Wipe Disk", 10, 13, 25, 3, 0xFF3B30, 0xFFFFFF)
+    local btn3 = button("Boot OpenOS", 10, 18, 25, 3, 0x34C759, 0xFFFFFF)
+    local btn4 = button("Exit", 10, 23, 25, 3, 0x2C2C2C, 0xFFFFFF)
 
     while true do
       local _, _, x, y = event.pull("touch")
@@ -116,7 +120,7 @@ local function mainMenu()
         if #disks > 0 then wipeDisk(disks[1].addr) end
         break
       elseif inside(x, y, btn3) then
-        loadOpenOSFromDisk()
+        bootOpenOS()
         break
       elseif inside(x, y, btn4) then
         computer.shutdown(true)
@@ -125,11 +129,11 @@ local function mainMenu()
   end
 end
 
--- старт
+-- 10) Start + crash guard
 local ok, err = pcall(mainMenu)
 if not ok then
   gpu.setForeground(0xFF0000)
-  center("ERROR: " .. tostring(err), 1)
+  center("CRASH: " .. tostring(err), 1)
   os.sleep(3)
   computer.shutdown(true)
 end
