@@ -1,580 +1,638 @@
--- tabletos_installer.lua
--- TabletOS Installer - Установщик для планшетов OpenComputers
+-- onix_installer.lua
+-- O/UNIX (Onix) Installer - Unix-подобная ОС для OpenComputers
 
 local component = require("component")
 local computer = require("computer")
 local event = require("event")
 local gpu = component.gpu
-local term = require("term")
 local filesystem = require("filesystem")
+local serialization = require("serialization")
 
--- Конфигурация TabletOS
-local TabletOS = {
-  name = "TabletOS",
-  version = "1.0",
+-- Конфигурация O/UNIX
+local Onix = {
+  name = "O/UNIX",
+  version = "0.1",
+  codename = "Onix",
   requirements = {
-    minMemory = 512 * 1024,  -- 512KB
-    minStorage = 500000,     -- ~500KB
-    gpuRequired = true
+    minMemory = 256 * 1024,  -- 256KB
+    minStorage = 1000000,    -- 1MB
   },
   structure = {
-    "/system",
-    "/apps", 
-    "/user",
-    "/cache",
-    "/config",
-    "/downloads"
+    "/bin",       -- Исполняемые файлы
+    "/etc",       -- Конфигурация
+    "/home",      -- Домашние директории
+    "/tmp",       -- Временные файлы
+    "/var",       -- Переменные данные
+    "/usr",       -- Пользовательские программы
+    "/usr/bin",   -- Дополнительные программы
+    "/usr/lib",   -- Библиотеки
+    "/dev",       -- Устройства
+    "/proc",      -- Процессы
+    "/mnt",       -- Точки монтирования
+    "/root",      -- root пользователь
+    "/boot",      -- Загрузчик
+    "/sys"        -- Системные файлы
   }
 }
-
--- Проверка сенсорного экрана (через события)
-local function hasTouchScreen()
-  if not component.isAvailable("gpu") then
-    return false
-  end
-  
-  local w, h = gpu.getResolution()
-  return w >= 40 and h >= 12
-end
 
 -- Проверка совместимости
 local function checkCompatibility()
   local issues = {}
-  local warnings = {}
   
-  if computer.totalMemory() < TabletOS.requirements.minMemory then
-    table.insert(issues, "❌ Недостаточно памяти: " .. math.floor(computer.totalMemory()/1024) .. "KB/" .. math.floor(TabletOS.requirements.minMemory/1024) .. "KB")
+  if computer.totalMemory() < Onix.requirements.minMemory then
+    table.insert(issues, "❌ Недостаточно памяти: " .. 
+      math.floor(computer.totalMemory()/1024) .. "KB/" .. 
+      math.floor(Onix.requirements.minMemory/1024) .. "KB")
   end
   
   local mainFs = component.list("filesystem")()
   if mainFs then
     local disk = component.proxy(mainFs)
-    if disk.spaceTotal() < TabletOS.requirements.minStorage then
-      table.insert(issues, "❌ Недостаточно места: " .. disk.spaceTotal() .. "/" .. TabletOS.requirements.minStorage)
+    if disk.spaceTotal() < Onix.requirements.minStorage then
+      table.insert(issues, "❌ Недостаточно места: " .. 
+        disk.spaceTotal() .. "/" .. Onix.requirements.minStorage)
     end
   else
     table.insert(issues, "❌ Не найден диск для установки")
   end
   
-  if not component.isAvailable("gpu") then
-    table.insert(issues, "❌ Требуется видеокарта")
-  end
-  
-  if not hasTouchScreen() then
-    table.insert(warnings, "⚠️  Сенсорный экран не обнаружен - управление клавиатурой")
-  end
-  
-  return issues, warnings
+  return issues
 end
 
--- Создание структуры диска
-local function createDirectoryStructure()
-  print("📁 Создаем структуру TabletOS...")
+-- Создание структуры файловой системы
+local function createFilesystemStructure()
+  print("📁 Создаем структуру O/UNIX...")
   
-  for _, dir in ipairs(TabletOS.structure) do
+  for _, dir in ipairs(Onix.structure) do
     filesystem.makeDirectory(dir)
-    print("   ✅ " .. dir)
-  end
-  
-  local systemDirs = {
-    "/system/kernel",
-    "/system/lib", 
-    "/system/bin",
-    "/system/ui",
-    "/system/drivers",
-    "/apps/system",
-    "/apps/user",
-    "/user/documents",
-    "/user/pictures",
-    "/user/music",
-    "/config/system",
-    "/config/apps"
-  }
-  
-  for _, dir in ipairs(systemDirs) do
-    filesystem.makeDirectory(dir)
+    print("   📁 " .. dir)
   end
 end
 
--- Установка ядра системы
-local function installKernel()
-  print("🔧 Устанавливаем ядро TabletOS...")
+-- Установка системных утилит (Unix-команды)
+local function installSystemUtilities()
+  print("🔧 Устанавливаем системные утилиты...")
   
-  local kernelFiles = {
-    ["/boot.lua"] = [[
--- TabletOS Bootloader
-local component = require("component")
-local computer = require("computer")
-local event = require("event")
+  local utilities = {
+    -- Системный загрузчик
+    ["/boot/onix.boot"] = [[
+#!/bin/onix
+-- O/UNIX Bootloader
+print("Booting O/UNIX " .. _ONIX_VERSION .. "...")
 
-print("📱 TabletOS v1.0 загружается...")
-
-if not component.isAvailable("gpu") then
-  print("❌ Ошибка: Требуется видеокарта")
-  return
-end
-
-local gpu = component.gpu
-local w, h = gpu.getResolution()
-
-if require("filesystem").exists("/system/kernel/init.lua") then
-  dofile("/system/kernel/init.lua")
-else
-  print("❌ Ошибка: Ядро системы не найдено")
-  computer.beep(1000, 0.5)
-  return
-end
-
-if tabletOS and tabletOS.boot then
-  tabletOS.boot()
-else
-  print("❌ Ошибка: Не удалось запустить систему")
-end
+-- Инициализация системы
+dofile("/etc/init.lua")
 ]],
 
-    ["/system/kernel/init.lua"] = [[
--- TabletOS Init System
-tabletOS = {
-  version = "1.0",
-  apps = {},
-  settings = {
-    brightness = 80,
-    volume = 70,
-    wallpaper = 1
+    -- Ядро системы
+    ["/etc/init.lua"] = [[
+-- O/UNIX Init System
+_ONIX_VERSION = "]] .. Onix.version .. [["
+_ONIX_CODENAME = "]] .. Onix.codename .. [["
+
+-- Глобальные переменные системы
+os.setenv("PATH", "/bin:/usr/bin")
+os.setenv("HOME", "/home/user")
+os.setenv("USER", "user")
+os.setenv("SHELL", "/bin/osh")
+
+-- Системные вызовы
+function os.setenv(name, value)
+  _G["ENV_" .. name] = value
+end
+
+function os.getenv(name)
+  return _G["ENV_" .. name]
+end
+
+function os.export(name, value)
+  os.setenv(name, value)
+end
+
+-- Менеджер процессов
+process = {
+  running = {},
+  next_pid = 1
+}
+
+function process.fork(fn)
+  local pid = process.next_pid
+  process.next_pid = process.next_pid + 1
+  process.running[pid] = {
+    func = fn,
+    status = "running"
   }
-}
-
-tabletOS.systemApps = {
-  launcher = "/system/ui/launcher.lua",
-  settings = "/apps/system/settings.lua",
-  camera = "/apps/system/camera.lua",
-  music = "/apps/system/music.lua",
-  browser = "/apps/system/browser.lua",
-  calculator = "/apps/system/calculator.lua"
-}
-
-function tabletOS.installApp(name, path)
-  tabletOS.apps[name] = path
-  print("📱 Установлено приложение: " .. name)
+  return pid
 end
 
-function tabletOS.launchApp(path)
-  if require("filesystem").exists(path) then
-    local success, err = pcall(dofile, path)
-    if not success then
-      print("❌ Ошибка запуска: " .. tostring(err))
-      computer.beep(800, 0.3)
-    end
-    return success
-  else
-    print("❌ Приложение не найдено: " .. path)
-    return false
+function process.kill(pid)
+  if process.running[pid] then
+    process.running[pid].status = "killed"
   end
 end
 
-function tabletOS.boot()
-  print("🚀 Запускаем TabletOS...")
-  
-  for name, path in pairs(tabletOS.systemApps) do
-    tabletOS.installApp(name, path)
-  end
-  
-  if tabletOS.systemApps.launcher then
-    tabletOS.launchApp(tabletOS.systemApps.launcher)
-  else
-    print("❌ Лаунчер не найден")
-  end
-end
-
-function tabletOS.shutdown()
-  print("🔄 Выключаем TabletOS...")
-  computer.shutdown()
-end
-
-function tabletOS.reboot()
-  print("🔃 Перезагружаем TabletOS...")
-  computer.shutdown(true)
-end
+-- Запуск оболочки
+print("O/UNIX " .. _ONIX_VERSION .. " (" .. _ONIX_CODENAME .. ") ready")
+dofile("/bin/osh")
 ]],
 
-    ["/system/ui/launcher.lua"] = [[
--- Графический лаунчер для планшета
-local component = require("component")
-local computer = require("computer")
-local event = require("event")
-local gpu = component.gpu
-
-if not gpu then
-  print("❌ Требуется видеокарта для лаунчера")
-  return
-end
-
-launcher = {
-  apps = {
-    {"🏠", "Главная", "launcher"},
-    {"📷", "Камера", "camera"},
-    {"🎵", "Музыка", "music"}, 
-    {"🧮", "Калькулятор", "calculator"},
-    {"🌐", "Браузер", "browser"},
-    {"⚙️", "Настройки", "settings"},
-    {"📞", "Звонки", "dialer"},
-    {"👤", "Контакты", "contacts"}
-  },
-  running = true
-}
-
-function launcher.drawInterface()
-  local w, h = gpu.getResolution()
-  
-  gpu.setBackground(0x1a1a2e)
-  gpu.fill(1, 1, w, h, " ")
-  
-  gpu.setBackground(0x333333)
-  gpu.fill(1, 1, w, 1, " ")
-  gpu.setForeground(0xFFFFFF)
-  gpu.set(2, 1, "TabletOS v1.0")
-  
-  local time = os.date("%H:%M")
-  gpu.set(w - #time - 1, 1, time)
-  
-  local cols = 4
-  local rows = 2
-  local iconWidth = math.floor(w / cols)
-  local iconHeight = 4
-
-  for i, app in ipairs(launcher.apps) do
-    if i <= cols * rows then
-      local col = (i - 1) % cols
-      local row = math.floor((i - 1) / cols)
-      local x = col * iconWidth + 1
-      local y = row * iconHeight + 3
-      
-      gpu.setBackground(0x444444)
-      gpu.fill(x, y, iconWidth - 1, iconHeight - 1, " ")
-      
-      gpu.setForeground(0xFFFFFF)
-      gpu.set(x + math.floor(iconWidth/2) - 1, y + 1, app[1])
-      
-      gpu.set(x + math.floor((iconWidth - #app[2])/2), y + 2, app[2])
-    end
+    -- Оболочка O/UNIX Shell (osh)
+    ["/bin/osh"] = [[
+-- O/UNIX Shell
+local function parseCommand(line)
+  local parts = {}
+  for part in line:gmatch("%S+") do
+    table.insert(parts, part)
   end
-  
-  gpu.setBackground(0x333333)
-  gpu.fill(1, h, w, 1, " ")
-  gpu.set(2, h, "🏠 Нажмите ESC для выхода")
+  return parts
 end
 
-function launcher.handleInput()
-  while launcher.running do
-    local e, _, x, y, button = event.pull()
+local function executeCommand(cmd, args)
+  local commandPath = "/bin/" .. cmd
+  if filesystem.exists(commandPath) then
+    local env = {
+      args = args,
+      PATH = os.getenv("PATH"),
+      USER = os.getenv("USER"),
+      HOME = os.getenv("HOME")
+    }
     
-    if e == "touch" then
-      local cols = 4
-      local iconWidth = math.floor(gpu.getResolution() / cols)
-      local iconHeight = 4
-      
-      for i, app in ipairs(launcher.apps) do
-        if i <= 8 then
-          local col = (i - 1) % cols
-          local row = math.floor((i - 1) / cols)
-          local iconX = col * iconWidth + 1
-          local iconY = row * iconHeight + 3
-          
-          if x >= iconX and x < iconX + iconWidth - 1 and
-             y >= iconY and y < iconY + iconHeight - 1 then
-            print("📱 Запускаем: " .. app[2])
-            tabletOS.launchApp(tabletOS.systemApps[app[3]] or app[3])
-          end
-        end
-      end
-      
-    elseif e == "key_down" then
-      if button == 27 then
-        launcher.running = false
-        print("👋 Выход из лаунчера")
-        computer.beep(600, 0.2)
-      elseif button == 13 then
-        tabletOS.launchApp(tabletOS.systemApps.settings)
-      end
+    local old_env = _G.ENV
+    _G.ENV = env
+    local success, result = pcall(dofile, commandPath)
+    _G.ENV = old_env
+    
+    if not success then
+      print("osh: " .. cmd .. ": " .. tostring(result))
     end
+  else
+    print("osh: " .. cmd .. ": command not found")
   end
 end
 
-print("🚀 Запускаем лаунчер...")
-launcher.drawInterface()
-launcher.handleInput()
+local function showPrompt()
+  local user = os.getenv("USER") or "user"
+  local hostname = "onix"
+  local cwd = os.getenv("PWD") or "/"
+  
+  io.write(user .. "@" .. hostname .. ":" .. cwd .. "$ ")
+  return io.read()
+end
+
+-- Основной цикл оболочки
+print("O/UNIX Shell " .. _ONIX_VERSION)
+print('Type "help" for available commands')
+
+while true do
+  local line = showPrompt()
+  if not line then break end
+  
+  line = line:match("^%s*(.-)%s*$") -- trim
+  
+  if line == "exit" then
+    break
+  elseif line ~= "" then
+    local parts = parseCommand(line)
+    local cmd = table.remove(parts, 1)
+    executeCommand(cmd, parts)
+  end
+end
+]],
+
+    -- Команда ls
+    ["/bin/ls"] = [[
+-- ls - list directory contents
+local args = _G.ENV.args or {}
+local path = args[1] or "."
+
+if not filesystem.exists(path) then
+  print("ls: cannot access '" .. path .. "': No such file or directory")
+  return
+end
+
+local list = filesystem.list(path)
+for item in list do
+  local fullPath = filesystem.concat(path, item)
+  if filesystem.isDirectory(fullPath) then
+    print(item .. "/")
+  else
+    print(item)
+  end
+end
+]],
+
+    -- Команда pwd
+    ["/bin/pwd"] = [[
+-- pwd - print working directory
+print(_G.ENV.PWD or "/")
+]],
+
+    -- Команда cd
+    ["/bin/cd"] = [[
+-- cd - change directory
+local args = _G.ENV.args or {}
+local path = args[1] or os.getenv("HOME") or "/"
+
+if not filesystem.exists(path) then
+  print("cd: " .. path .. ": No such file or directory")
+  return
+end
+
+if not filesystem.isDirectory(path) then
+  print("cd: " .. path .. ": Not a directory")
+  return
+end
+
+os.setenv("PWD", path)
+]],
+
+    -- Команда cat
+    ["/bin/cat"] = [[
+-- cat - concatenate and print files
+local args = _G.ENV.args or {}
+
+if #args == 0 then
+  -- Чтение из stdin
+  while true do
+    local line = io.read()
+    if not line then break end
+    print(line)
+  end
+else
+  for _, filename in ipairs(args) do
+    if filesystem.exists(filename) then
+      local file = io.open(filename, "r")
+      if file then
+        local content = file:read("*a")
+        file:close()
+        io.write(content)
+      end
+    else
+      print("cat: " .. filename .. ": No such file or directory")
+    end
+  end
+end
+]],
+
+    -- Команда echo
+    ["/bin/echo"] = [[
+-- echo - display a line of text
+local args = _G.ENV.args or {}
+print(table.concat(args, " "))
+]],
+
+    -- Команда mkdir
+    ["/bin/mkdir"] = [[
+-- mkdir - make directories
+local args = _G.ENV.args or {}
+
+for _, dirname in ipairs(args) do
+  if filesystem.exists(dirname) then
+    print("mkdir: cannot create directory '" .. dirname .. "': File exists")
+  else
+    local success = pcall(filesystem.makeDirectory, dirname)
+    if not success then
+      print("mkdir: cannot create directory '" .. dirname .. "'")
+    end
+  end
+end
+]],
+
+    -- Команда rm
+    ["/bin/rm"] = [[
+-- rm - remove files or directories
+local args = _G.ENV.args or {}
+
+for _, filename in ipairs(args) do
+  if filesystem.exists(filename) then
+    if filesystem.isDirectory(filename) then
+      -- Рекурсивное удаление для директорий
+      local list = filesystem.list(filename)
+      for item in list do
+        local fullPath = filesystem.concat(filename, item)
+        _G.ENV.args = {fullPath}
+        dofile("/bin/rm")
+      end
+    end
+    filesystem.remove(filename)
+  else
+    print("rm: cannot remove '" .. filename .. "': No such file or directory")
+  end
+end
+]],
+
+    -- Команда cp
+    ["/bin/cp"] = [[
+-- cp - copy files
+local args = _G.ENV.args or {}
+
+if #args < 2 then
+  print("cp: missing file operands")
+  return
+end
+
+local sources = {}
+local target = args[#args]
+
+for i = 1, #args - 1 do
+  table.insert(sources, args[i])
+end
+
+for _, source in ipairs(sources) do
+  if not filesystem.exists(source) then
+    print("cp: cannot stat '" .. source .. "': No such file or directory")
+    return
+  end
+  
+  local targetPath = target
+  if filesystem.isDirectory(target) then
+    targetPath = filesystem.concat(target, source:match("([^/]+)$"))
+  end
+  
+  if filesystem.exists(targetPath) then
+    print("cp: cannot create '" .. targetPath .. "': File exists")
+    return
+  end
+  
+  local sourceFile = io.open(source, "r")
+  local targetFile = io.open(targetPath, "w")
+  
+  if sourceFile and targetFile then
+    local content = sourceFile:read("*a")
+    targetFile:write(content)
+    sourceFile:close()
+    targetFile:close()
+  else
+    print("cp: error copying '" .. source .. "' to '" .. targetPath .. "'")
+  end
+end
+]],
+
+    -- Команда mv
+    ["/bin/mv"] = [[
+-- mv - move files
+local args = _G.ENV.args or {}
+
+if #args < 2 then
+  print("mv: missing file operands")
+  return
+end
+
+local sources = {}
+local target = args[#args]
+
+for i = 1, #args - 1 do
+  table.insert(sources, args[i])
+end
+
+for _, source in ipairs(sources) do
+  if not filesystem.exists(source) then
+    print("mv: cannot stat '" .. source .. "': No such file or directory")
+    return
+  end
+  
+  local targetPath = target
+  if filesystem.isDirectory(target) then
+    targetPath = filesystem.concat(target, source:match("([^/]+)$"))
+  end
+  
+  if filesystem.exists(targetPath) then
+    filesystem.remove(targetPath)
+  end
+  
+  filesystem.rename(source, targetPath)
+end
+]],
+
+    -- Команда ps
+    ["/bin/ps"] = [[
+-- ps - report process status
+print("PID\tSTATUS")
+for pid, proc in pairs(process.running) do
+  print(pid .. "\t" .. proc.status)
+end
+]],
+
+    -- Команда kill
+    ["/bin/kill"] = [[
+-- kill - terminate processes
+local args = _G.ENV.args or {}
+
+if #args == 0 then
+  print("kill: usage: kill <pid>")
+  return
+end
+
+for _, pid_str in ipairs(args) do
+  local pid = tonumber(pid_str)
+  if pid and process.running[pid] then
+    process.kill(pid)
+    print("Killed process " .. pid)
+  else
+    print("kill: (" .. pid_str .. ") - No such process")
+  end
+end
+]],
+
+    -- Команда whoami
+    ["/bin/whoami"] = [[
+-- whoami - print effective userid
+print(os.getenv("USER") or "user")
+]],
+
+    -- Команда date
+    ["/bin/date"] = [[
+-- date - print or set the system date and time
+print(os.date("%c"))
+]],
+
+    -- Команда uname
+    ["/bin/uname"] = [[
+-- uname - print system information
+local args = _G.ENV.args or {}
+
+if #args > 0 and args[1] == "-a" then
+  print("O/UNIX " .. _ONIX_VERSION .. " " .. _ONIX_CODENAME .. " OpenComputers")
+else
+  print("O/UNIX")
+end
+]],
+
+    -- Команда help
+    ["/bin/help"] = [[
+-- help - display available commands
+print("O/UNIX " .. _ONIX_VERSION .. " Available Commands:")
+print("ls          - List directory contents")
+print("cd          - Change directory")
+print("pwd         - Print working directory")
+print("cat         - Concatenate and print files")
+print("echo        - Display a line of text")
+print("mkdir       - Make directories")
+print("rm          - Remove files or directories")
+print("cp          - Copy files")
+print("mv          - Move files")
+print("ps          - Report process status")
+print("kill        - Terminate processes")
+print("whoami      - Print effective userid")
+print("date        - Print system date and time")
+print("uname       - Print system information")
+print("clear       - Clear the terminal screen")
+print("exit        - Exit the shell")
+print("help        - Display this help")
+]],
+
+    -- Команда clear
+    ["/bin/clear"] = [[
+-- clear - clear the terminal screen
+local gpu = component.gpu
+if gpu then
+  local w, h = gpu.getResolution()
+  gpu.fill(1, 1, w, h, " ")
+  gpu.set(1, 1, "")
+end
 ]]
   }
   
-  for path, content in pairs(kernelFiles) do
+  for path, content in pairs(utilities) do
     local file = io.open(path, "w")
     if file then
       file:write(content)
       file:close()
       print("   ✅ " .. path)
     else
-      print("   ❌ Ошибка записи: " .. path)
+      print("   ❌ " .. path)
     end
   end
 end
 
--- Установка системных приложений
-local function installSystemApps()
-  print("📱 Устанавливаем системные приложения...")
+-- Создание конфигурационных файлов
+local function createConfigFiles()
+  print("⚙️  Создаем конфигурационные файлы...")
   
-  local systemApps = {
-    ["/apps/system/settings.lua"] = [[
-local component = require("component")
-local computer = require("computer")
-local event = require("event")
-local gpu = component.gpu
-
-settingsApp = {
-  running = true,
-  options = {
-    {"Яркость", "brightness", 80},
-    {"Громкость", "volume", 70},
-    {"Обои", "wallpaper", 1}
-  }
-}
-
-function settingsApp.show()
-  local w, h = gpu.getResolution()
-  
-  gpu.setBackground(0x222222)
-  gpu.fill(1, 1, w, h, " ")
-  
-  gpu.setBackground(0x444444)
-  gpu.fill(1, 1, w, 1, " ")
-  gpu.setForeground(0xFFFFFF)
-  gpu.set(3, 1, "⚙️ Настройки TabletOS")
-  
-  for i, option in ipairs(settingsApp.options) do
-    gpu.setForeground(0xCCCCCC)
-    gpu.set(3, 3 + i, option[1] .. ":")
-    gpu.set(15, 3 + i, tostring(option[3]))
-  end
-  
-  gpu.setBackground(0x666666)
-  gpu.fill(2, h - 2, 8, 1, " ")
-  gpu.set(3, h - 2, "← Назад")
-end
-
-function settingsApp.handleInput()
-  while settingsApp.running do
-    local e, _, x, y = event.pull()
-    
-    if e == "touch" then
-      local w, h = gpu.getResolution()
-      
-      if y == h - 2 and x >= 2 and x <= 10 then
-        settingsApp.running = false
-        computer.beep(500, 0.1)
-      end
-      
-    elseif e == "key_down" then
-      if button == 27 then
-        settingsApp.running = false
-      end
-    end
-  end
-end
-
-print("⚙️  Запускаем настройки...")
-settingsApp.show()
-settingsApp.handleInput()
-print("🔙 Возвращаемся в лаунчер...")
+  local configs = {
+    ["/etc/motd"] = [[
+Welcome to O/UNIX ]] .. Onix.version .. [[ (]] .. Onix.codename .. [[)
+A Unix-like operating system for OpenComputers
 ]],
 
-    ["/apps/system/calculator.lua"] = [[
-local component = require("component")
-local gpu = component.gpu
-
-calculator = {
-  display = "0",
-  running = true
-}
-
-function calculator.draw()
-  local w, h = gpu.getResolution()
-  
-  gpu.setBackground(0x000000)
-  gpu.fill(1, 1, w, h, " ")
-  
-  gpu.setBackground(0x333333)
-  gpu.fill(2, 2, w - 2, 3, " ")
-  gpu.setForeground(0xFFFFFF)
-  gpu.set(w - #calculator.display - 2, 3, calculator.display)
-  
-  local buttons = {
-    "7", "8", "9", "/",
-    "4", "5", "6", "*", 
-    "1", "2", "3", "-",
-    "0", "C", "=", "+"
-  }
-  
-  for i, btn in ipairs(buttons) do
-    local row = math.floor((i-1)/4)
-    local col = (i-1)%4
-    local x = 2 + col * 5
-    local y = 6 + row * 2
-    
-    gpu.setBackground(0x666666)
-    gpu.fill(x, y, 4, 1, " ")
-    gpu.setForeground(0xFFFFFF)
-    gpu.set(x + 2 - math.floor(#btn/2), y, btn)
-  end
-end
-
-calculator.draw()
-print("🧮 Калькулятор запущен (ESC для выхода)")
+    ["/etc/passwd"] = [[
+root:x:0:0:Root user:/root:/bin/osh
+user:x:1000:1000:Default user:/home/user:/bin/osh
 ]],
 
-    ["/apps/system/browser.lua"] = [[
-print("🌐 Браузер запущен")
-print("В разработке...")
-print("Нажмите ESC для выхода")
+    ["/etc/hostname"] = [[
+onix
 ]],
 
-    ["/apps/system/music.lua"] = [[
-print("🎵 Музыкальный плеер")
-print("В разработке...")
-print("Нажмите ESC для выхода")
-]],
-
-    ["/apps/system/camera.lua"] = [[
-print("📷 Камера")
-print("В разработке...") 
-print("Нажмите ESC для выхода")
+    ["/home/user/.profile"] = [[
+echo "Welcome to O/UNIX, $USER!"
 ]]
   }
   
-  for path, content in pairs(systemApps) do
+  for path, content in pairs(configs) do
     local file = io.open(path, "w")
     if file then
       file:write(content)
       file:close()
-      print("   ✅ " .. path)
+      print("   ⚙️  " .. path)
     end
+  end
+end
+
+-- Установка загрузчика
+local function installBootloader()
+  print("🚀 Устанавливаем загрузчик...")
+  
+  local bootloader = [[
+-- O/UNIX Bootloader
+local computer = require("computer")
+local filesystem = require("filesystem")
+
+print("Booting O/UNIX ]] .. Onix.version .. [[...")
+
+-- Проверка файловой системы
+if not filesystem.exists("/etc/init.lua") then
+  print("ERROR: System files not found")
+  computer.beep(200, 1)
+  return
+end
+
+-- Загрузка ядра
+local success, err = pcall(dofile, "/etc/init.lua")
+if not success then
+  print("Boot failed: " .. tostring(err))
+  computer.beep(200, 1)
+  return
+end
+
+print("O/UNIX started successfully")
+]]
+  
+  local bootFile = io.open("/boot.lua", "w")
+  if bootFile then
+    bootFile:write(bootloader)
+    bootFile:close()
+    print("   ✅ Загрузчик установлен")
   end
 end
 
 -- Основной процесс установки
 local function performInstallation()
-  print("\n🎯 Начинаем установку TabletOS...")
-  print("==========================================")
+  print("\n🎯 Начинаем установку O/UNIX...")
+  print("========================================")
   
-  local issues, warnings = checkCompatibility()
-  
+  local issues = checkCompatibility()
   if #issues > 0 then
     print("❌ Проблемы с совместимостью:")
     for _, issue in ipairs(issues) do
       print("   " .. issue)
     end
-    computer.beep(300, 1)
     return false
-  end
-  
-  if #warnings > 0 then
-    print("⚠️  Предупреждения:")
-    for _, warning in ipairs(warnings) do
-      print("   " .. warning)
-    end
   end
   
   print("✅ Система совместима!")
   
-  createDirectoryStructure()
-  installKernel()
-  installSystemApps()
+  createFilesystemStructure()
+  installSystemUtilities()
+  createConfigFiles()
+  installBootloader()
   
-  print("\n🎉 Установка завершена!")
-  print("==========================================")
-  print("TabletOS готова к использованию!")
-  print("Перезагрузите устройство для запуска.")
-  print("Управление:")
-  print("  - Касание: выбор приложений")
-  print("  - ESC: выход из приложений")
-  print("  - Enter: настройки")
+  print("\n🎉 Установка O/UNIX завершена!")
+  print("========================================")
+  print("O/UNIX " .. Onix.version .. " (" .. Onix.codename .. ")")
+  print("")
+  print("Доступные команды:")
+  print("  ls, cd, pwd, cat, echo, mkdir, rm")
+  print("  cp, mv, ps, kill, whoami, date, uname")
+  print("  clear, help, exit")
+  print("")
+  print("Перезагрузите компьютер для запуска O/UNIX")
+  print("Используйте 'help' для списка команд")
   
   computer.beep(1000, 0.2)
   computer.beep(1200, 0.2)
-  computer.beep(1400, 0.3)
   
   return true
 end
 
--- Графический установщик
-local function showInstaller()
-  local w, h = gpu.getResolution()
+-- Текстовый установщик
+local function showTextInstaller()
+  print("O/UNIX (Onix) Installer v" .. Onix.version)
+  print("========================================")
+  print("Unix-like OS for OpenComputers")
+  print("")
+  print("Это установит O/UNIX на ваш компьютер.")
+  print("Все существующие данные будут удалены!")
+  print("")
+  print("Продолжить? (y/n)")
   
-  gpu.setBackground(0x1a1a2e)
-  gpu.fill(1, 1, w, h, " ")
-  
-  gpu.setBackground(0x333333)
-  gpu.fill(1, 1, w, 3, " ")
-  gpu.setForeground(0xFFFFFF)
-  gpu.set(math.floor(w/2) - 8, 2, "📱 TabletOS Installer")
-  
-  gpu.setForeground(0xCCCCCC)
-  gpu.set(3, 5, "Версия: " .. TabletOS.version)
-  gpu.set(3, 6, "Память: " .. math.floor(computer.totalMemory()/1024) .. " KB")
-  
-  local mainFs = component.list("filesystem")()
-  if mainFs then
-    local disk = component.proxy(mainFs)
-    gpu.set(3, 7, "Диск: " .. disk.spaceTotal() .. " байт")
-  end
-  
-  gpu.set(3, 8, "Сенсорный: " .. (hasTouchScreen() and "✅" or "❌ (клавиатура)"))
-  
-  gpu.setForeground(0xFFAA00)
-  gpu.set(3, 10, "⚠️  Вся существующая система будет заменена!")
-  
-  gpu.setBackground(0x00AA00)
-  gpu.fill(math.floor(w/2) - 6, 12, 12, 3, " ")
-  gpu.setForeground(0xFFFFFF)
-  gpu.set(math.floor(w/2) - 4, 13, "УСТАНОВИТЬ")
-  
-  gpu.setBackground(0xAA0000)
-  gpu.fill(math.floor(w/2) - 6, 16, 12, 3, " ")
-  gpu.setForeground(0xFFFFFF)
-  gpu.set(math.floor(w/2) - 3, 17, "ОТМЕНА")
-  
-  print("\n🖱️  Используйте касание или клавиши для выбора...")
-  
-  while true do
-    local e, _, x, y, button = event.pull()
-    
-    if e == "touch" then
-      if y >= 12 and y <= 14 and x >= math.floor(w/2) - 6 and x <= math.floor(w/2) + 6 then
-        computer.beep(800, 0.1)
-        performInstallation()
-        break
-      elseif y >= 16 and y <= 18 and x >= math.floor(w/2) - 6 and x <= math.floor(w/2) + 6 then
-        computer.beep(400, 0.2)
-        print("❌ Установка отменена")
-        break
-      end
-      
-    elseif e == "key_down" then
-      if button == 13 then
-        computer.beep(800, 0.1)
-        performInstallation()
-        break
-      elseif button == 27 then
-        computer.beep(400, 0.2)
-        print("❌ Установка отменена")
-        break
-      end
-    end
+  local answer = io.read()
+  if answer:lower() == "y" or answer:lower() == "yes" then
+    performInstallation()
+  else
+    print("❌ Установка отменена")
   end
 end
 
 -- Запуск установщика
-print("TabletOS Installer v" .. TabletOS.version)
-if component.isAvailable("gpu") then
-  showInstaller()
-else
-  performInstallation()
-end
+showTextInstaller()
