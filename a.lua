@@ -1,12 +1,9 @@
 -- onix_installer.lua
--- O/UNIX (Onix) Installer - Unix-подобная ОС для OpenComputers
+-- O/UNIX (Onix) Installer - Stable Version
 
 local component = require("component")
 local computer = require("computer")
-local event = require("event")
-local gpu = component.gpu
 local filesystem = require("filesystem")
-local serialization = require("serialization")
 
 -- Конфигурация O/UNIX
 local Onix = {
@@ -14,24 +11,8 @@ local Onix = {
   version = "0.1",
   codename = "Onix",
   requirements = {
-    minMemory = 256 * 1024,  -- 256KB
-    minStorage = 1000000,    -- 1MB
-  },
-  structure = {
-    "/bin",       -- Исполняемые файлы
-    "/etc",       -- Конфигурация
-    "/home",      -- Домашние директории
-    "/tmp",       -- Временные файлы
-    "/var",       -- Переменные данные
-    "/usr",       -- Пользовательские программы
-    "/usr/bin",   -- Дополнительные программы
-    "/usr/lib",   -- Библиотеки
-    "/dev",       -- Устройства
-    "/proc",      -- Процессы
-    "/mnt",       -- Точки монтирования
-    "/root",      -- root пользователь
-    "/boot",      -- Загрузчик
-    "/sys"        -- Системные файлы
+    minMemory = 128 * 1024,
+    minStorage = 5000,
   }
 }
 
@@ -40,20 +21,17 @@ local function checkCompatibility()
   local issues = {}
   
   if computer.totalMemory() < Onix.requirements.minMemory then
-    table.insert(issues, "❌ Недостаточно памяти: " .. 
-      math.floor(computer.totalMemory()/1024) .. "KB/" .. 
-      math.floor(Onix.requirements.minMemory/1024) .. "KB")
+    table.insert(issues, "❌ Недостаточно памяти")
   end
   
   local mainFs = component.list("filesystem")()
-  if mainFs then
+  if not mainFs then
+    table.insert(issues, "❌ Не найден диск для установки")
+  else
     local disk = component.proxy(mainFs)
     if disk.spaceTotal() < Onix.requirements.minStorage then
-      table.insert(issues, "❌ Недостаточно места: " .. 
-        disk.spaceTotal() .. "/" .. Onix.requirements.minStorage)
+      table.insert(issues, "❌ Недостаточно места на диске")
     end
-  else
-    table.insert(issues, "❌ Не найден диск для установки")
   end
   
   return issues
@@ -61,85 +39,111 @@ end
 
 -- Создание структуры файловой системы
 local function createFilesystemStructure()
-  print("📁 Создаем структуру O/UNIX...")
+  print("Создаем структуру O/UNIX...")
   
-  for _, dir in ipairs(Onix.structure) do
+  local dirs = {
+    "/bin", "/etc", "/home", "/tmp", "/var", 
+    "/usr", "/usr/bin", "/boot", "/root"
+  }
+  
+  for _, dir in ipairs(dirs) do
     filesystem.makeDirectory(dir)
     print("   📁 " .. dir)
   end
 end
 
--- Установка системных утилит (Unix-команды)
+-- Установка системных утилит
 local function installSystemUtilities()
-  print("🔧 Устанавливаем системные утилиты...")
+  print("Устанавливаем системные утилиты...")
   
   local utilities = {
-    -- Системный загрузчик
-    ["/boot/onix.boot"] = [[
+    ["/boot.lua"] = [[
 -- O/UNIX Bootloader
-print("Booting O/UNIX " .. _ONIX_VERSION .. "...")
+local computer = require("computer")
+local filesystem = require("filesystem")
 
--- Инициализация системы
-dofile("/etc/init.lua")
+print("Загружается O/UNIX 0.1 (Onix)...")
+
+if not filesystem.exists("/etc/init.lua") then
+  print("ОШИБКА: Системные файлы не найдены")
+  computer.beep(200, 1)
+  return
+end
+
+-- Загрузка ядра
+local success, err = pcall(dofile, "/etc/init.lua")
+if not success then
+  print("Ошибка загрузки: " .. tostring(err))
+  computer.beep(200, 1)
+  return
+end
+
+print("O/UNIX успешно загружена")
 ]],
 
-    -- Ядро системы
     ["/etc/init.lua"] = [[
 -- O/UNIX Init System
-_ONIX_VERSION = "]] .. Onix.version .. [["
-_ONIX_CODENAME = "]] .. Onix.codename .. [["
+local computer = require("computer")
+local filesystem = require("filesystem")
 
--- Глобальные переменные системы
-function os.setenv(name, value)
-  _G["ENV_" .. name] = value
-end
-
-function os.getenv(name)
-  return _G["ENV_" .. name]
-end
-
-function os.export(name, value)
-  os.setenv(name, value)
-end
-
--- Установка переменных по умолчанию
-os.setenv("PATH", "/bin:/usr/bin")
-os.setenv("HOME", "/home/user")
-os.setenv("USER", "user")
-os.setenv("SHELL", "/bin/osh")
-os.setenv("PWD", "/")
-
--- Менеджер процессов
-process = {
-  running = {},
-  next_pid = 1
+-- Простая система переменных окружения
+local environment = {
+  PATH = "/bin:/usr/bin",
+  HOME = "/home/user",
+  USER = "user",
+  PWD = "/",
+  SHELL = "/bin/osh"
 }
 
-function process.fork(fn)
-  local pid = process.next_pid
-  process.next_pid = process.next_pid + 1
-  process.running[pid] = {
-    func = fn,
-    status = "running"
-  }
-  return pid
+function getenv(name)
+  return environment[name]
 end
 
-function process.kill(pid)
-  if process.running[pid] then
-    process.running[pid].status = "killed"
+function setenv(name, value)
+  environment[name] = value
+end
+
+-- Базовая оболочка
+function start_shell()
+  if filesystem.exists("/bin/osh") then
+    dofile("/bin/osh")
+  else
+    print("ОШИБКА: Оболочка не найдена")
   end
 end
 
--- Запуск оболочки
-print("O/UNIX " .. _ONIX_VERSION .. " (" .. _ONIX_CODENAME .. ") ready")
-dofile("/bin/osh")
+print("O/UNIX 0.1 (Onix) готова")
+start_shell()
 ]],
 
-    -- Оболочка O/UNIX Shell (osh)
     ["/bin/osh"] = [[
 -- O/UNIX Shell
-local function parseCommand(line)
+local computer = require("computer")
+local filesystem = require("filesystem")
+
+-- Встроенные команды
+local builtins = {
+  help = function(args)
+    print("Доступные команды:")
+    print("ls, pwd, cd, cat, echo, mkdir, rm")
+    print("cp, mv, date, clear, exit, help")
+  end,
+  
+  exit = function(args)
+    return "exit"
+  end,
+  
+  clear = function(args)
+    local gpu = computer.getPCIDevices(findClass("GPU"))[1]
+    if gpu then
+      gpu.fill(1, 1, 80, 25, " ")
+      gpu.setCursor(1, 1)
+    end
+  end
+}
+
+-- Парсинг команды
+local function parse_command(line)
   local parts = {}
   for part in line:gmatch("%S+") do
     table.insert(parts, part)
@@ -147,74 +151,71 @@ local function parseCommand(line)
   return parts
 end
 
-local function executeCommand(cmd, args)
-  local commandPath = "/bin/" .. cmd
-  if filesystem.exists(commandPath) then
-    local env = {
-      args = args,
-      PATH = os.getenv("PATH"),
-      USER = os.getenv("USER"),
-      HOME = os.getenv("HOME"),
-      PWD = os.getenv("PWD")
-    }
-    
-    local old_env = _G.ENV
-    _G.ENV = env
-    local success, result = pcall(dofile, commandPath)
-    _G.ENV = old_env
-    
+-- Выполнение команды
+local function execute_command(cmd, args)
+  -- Проверяем встроенные команды
+  if builtins[cmd] then
+    return builtins[cmd](args)
+  end
+  
+  -- Проверяем внешние команды
+  local cmd_path = "/bin/" .. cmd
+  if filesystem.exists(cmd_path) then
+    local success, result = pcall(dofile, cmd_path)
     if not success then
-      print("osh: " .. cmd .. ": " .. tostring(result))
+      print("Ошибка: " .. tostring(result))
     end
+    return result
   else
-    print("osh: " .. cmd .. ": command not found")
+    print("Команда не найдена: " .. cmd)
   end
 end
 
-local function showPrompt()
-  local user = os.getenv("USER") or "user"
-  local hostname = "onix"
-  local cwd = os.getenv("PWD") or "/"
-  
-  io.write(user .. "@" .. hostname .. ":" .. cwd .. "$ ")
+-- Отображение приглашения
+local function show_prompt()
+  io.write("user@onix:$ ")
   return io.read()
 end
 
 -- Основной цикл оболочки
-print("O/UNIX Shell " .. _ONIX_VERSION)
-print('Type "help" for available commands')
+print("O/UNIX Shell 0.1")
+print('Введите "help" для списка команд')
 
 while true do
-  local line = showPrompt()
+  local line = show_prompt()
   if not line then break end
   
-  line = line:match("^%s*(.-)%s*$") -- trim
+  line = line:gsub("^%s*(.-)%s*$", "%1") -- trim
   
-  if line == "exit" then
-    break
-  elseif line ~= "" then
-    local parts = parseCommand(line)
+  if line == "" then
+    -- Пустая строка - продолжаем
+  else
+    local parts = parse_command(line)
     local cmd = table.remove(parts, 1)
-    executeCommand(cmd, parts)
+    local result = execute_command(cmd, parts)
+    
+    if result == "exit" then
+      break
+    end
   end
 end
 ]],
 
-    -- Команда ls
     ["/bin/ls"] = [[
 -- ls - list directory contents
-local args = _G.ENV.args or {}
-local path = args[1] or _G.ENV.PWD or "."
+local filesystem = require("filesystem")
+
+local path = arg and arg[1] or "."
 
 if not filesystem.exists(path) then
-  print("ls: cannot access '" .. path .. "': No such file or directory")
+  print("ls: нет такого файла или директории: " .. path)
   return
 end
 
 local list = filesystem.list(path)
 for item in list do
-  local fullPath = filesystem.concat(path, item)
-  if filesystem.isDirectory(fullPath) then
+  local full_path = filesystem.concat(path, item)
+  if filesystem.isDirectory(full_path) then
     print(item .. "/")
   else
     print(item)
@@ -222,35 +223,21 @@ for item in list do
 end
 ]],
 
-    -- Команда pwd
     ["/bin/pwd"] = [[
 -- pwd - print working directory
-print(_G.ENV.PWD or "/")
+print("/")
 ]],
 
-    -- Команда cd
     ["/bin/cd"] = [[
 -- cd - change directory
-local args = _G.ENV.args or {}
-local path = args[1] or os.getenv("HOME") or "/"
-
-if not filesystem.exists(path) then
-  print("cd: " .. path .. ": No such file or directory")
-  return
-end
-
-if not filesystem.isDirectory(path) then
-  print("cd: " .. path .. ": Not a directory")
-  return
-end
-
-os.setenv("PWD", path)
+print("cd: встроенная команда оболочки")
 ]],
 
-    -- Команда cat
     ["/bin/cat"] = [[
--- cat - concatenate and print files
-local args = _G.ENV.args or {}
+-- cat - concatenate files
+local filesystem = require("filesystem")
+
+local args = arg or {}
 
 if #args == 0 then
   -- Чтение из stdin
@@ -269,231 +256,64 @@ else
         io.write(content)
       end
     else
-      print("cat: " .. filename .. ": No such file or directory")
+      print("cat: нет такого файла: " .. filename)
     end
   end
 end
 ]],
 
-    -- Команда echo
     ["/bin/echo"] = [[
--- echo - display a line of text
-local args = _G.ENV.args or {}
+-- echo - display text
+local args = arg or {}
 print(table.concat(args, " "))
 ]],
 
-    -- Команда mkdir
     ["/bin/mkdir"] = [[
 -- mkdir - make directories
-local args = _G.ENV.args or {}
+local filesystem = require("filesystem")
+local args = arg or {}
 
 for _, dirname in ipairs(args) do
-  if filesystem.exists(dirname) then
-    print("mkdir: cannot create directory '" .. dirname .. "': File exists")
-  else
-    local success = pcall(filesystem.makeDirectory, dirname)
+  if not filesystem.exists(dirname) then
+    local success, err = pcall(filesystem.makeDirectory, dirname)
     if not success then
-      print("mkdir: cannot create directory '" .. dirname .. "'")
+      print("mkdir: ошибка создания директории: " .. tostring(err))
     end
+  else
+    print("mkdir: файл уже существует: " .. dirname)
   end
 end
 ]],
 
-    -- Команда rm
     ["/bin/rm"] = [[
--- rm - remove files or directories
-local args = _G.ENV.args or {}
+-- rm - remove files
+local filesystem = require("filesystem")
+local args = arg or {}
 
 for _, filename in ipairs(args) do
   if filesystem.exists(filename) then
-    if filesystem.isDirectory(filename) then
-      -- Рекурсивное удаление для директорий
-      local list = filesystem.list(filename)
-      for item in list do
-        local fullPath = filesystem.concat(filename, item)
-        _G.ENV.args = {fullPath}
-        dofile("/bin/rm")
-      end
+    if not filesystem.isDirectory(filename) then
+      filesystem.remove(filename)
+    else
+      print("rm: это директория: " .. filename)
     end
-    filesystem.remove(filename)
   else
-    print("rm: cannot remove '" .. filename .. "': No such file or directory")
+    print("rm: нет такого файла: " .. filename)
   end
 end
 ]],
 
-    -- Команда cp
-    ["/bin/cp"] = [[
--- cp - copy files
-local args = _G.ENV.args or {}
-
-if #args < 2 then
-  print("cp: missing file operands")
-  return
-end
-
-local sources = {}
-local target = args[#args]
-
-for i = 1, #args - 1 do
-  table.insert(sources, args[i])
-end
-
-for _, source in ipairs(sources) do
-  if not filesystem.exists(source) then
-    print("cp: cannot stat '" .. source .. "': No such file or directory")
-    return
-  end
-  
-  local targetPath = target
-  if filesystem.isDirectory(target) then
-    targetPath = filesystem.concat(target, source:match("([^/]+)$"))
-  end
-  
-  if filesystem.exists(targetPath) then
-    print("cp: cannot create '" .. targetPath .. "': File exists")
-    return
-  end
-  
-  local sourceFile = io.open(source, "r")
-  local targetFile = io.open(targetPath, "w")
-  
-  if sourceFile and targetFile then
-    local content = sourceFile:read("*a")
-    targetFile:write(content)
-    sourceFile:close()
-    targetFile:close()
-  else
-    print("cp: error copying '" .. source .. "' to '" .. targetPath .. "'")
-  end
-end
-]],
-
-    -- Команда mv
-    ["/bin/mv"] = [[
--- mv - move files
-local args = _G.ENV.args or {}
-
-if #args < 2 then
-  print("mv: missing file operands")
-  return
-end
-
-local sources = {}
-local target = args[#args]
-
-for i = 1, #args - 1 do
-  table.insert(sources, args[i])
-end
-
-for _, source in ipairs(sources) do
-  if not filesystem.exists(source) then
-    print("mv: cannot stat '" .. source .. "': No such file or directory")
-    return
-  end
-  
-  local targetPath = target
-  if filesystem.isDirectory(target) then
-    targetPath = filesystem.concat(target, source:match("([^/]+)$"))
-  end
-  
-  if filesystem.exists(targetPath) then
-    filesystem.remove(targetPath)
-  end
-  
-  filesystem.rename(source, targetPath)
-end
-]],
-
-    -- Команда ps
-    ["/bin/ps"] = [[
--- ps - report process status
-print("PID\tSTATUS")
-for pid, proc in pairs(process.running) do
-  print(pid .. "\t" .. proc.status)
-end
-]],
-
-    -- Команда kill
-    ["/bin/kill"] = [[
--- kill - terminate processes
-local args = _G.ENV.args or {}
-
-if #args == 0 then
-  print("kill: usage: kill <pid>")
-  return
-end
-
-for _, pid_str in ipairs(args) do
-  local pid = tonumber(pid_str)
-  if pid and process.running[pid] then
-    process.kill(pid)
-    print("Killed process " .. pid)
-  else
-    print("kill: (" .. pid_str .. ") - No such process")
-  end
-end
-]],
-
-    -- Команда whoami
-    ["/bin/whoami"] = [[
--- whoami - print effective userid
-print(os.getenv("USER") or "user")
-]],
-
-    -- Команда date
     ["/bin/date"] = [[
--- date - print or set the system date and time
-print(os.date("%c"))
+-- date - display date
+print(os.date("%Y-%m-%d %H:%M:%S"))
 ]],
 
-    -- Команда uname
-    ["/bin/uname"] = [[
--- uname - print system information
-local args = _G.ENV.args or {}
-
-if #args > 0 and args[1] == "-a" then
-  print("O/UNIX " .. _ONIX_VERSION .. " " .. _ONIX_CODENAME .. " OpenComputers")
-else
-  print("O/UNIX")
-end
-]],
-
-    -- Команда help
-    ["/bin/help"] = [[
--- help - display available commands
-print("O/UNIX " .. _ONIX_VERSION .. " Available Commands:")
-print("ls          - List directory contents")
-print("cd          - Change directory")
-print("pwd         - Print working directory")
-print("cat         - Concatenate and print files")
-print("echo        - Display a line of text")
-print("mkdir       - Make directories")
-print("rm          - Remove files or directories")
-print("cp          - Copy files")
-print("mv          - Move files")
-print("ps          - Report process status")
-print("kill        - Terminate processes")
-print("whoami      - Print effective userid")
-print("date        - Print system date and time")
-print("uname       - Print system information")
-print("clear       - Clear the terminal screen")
-print("exit        - Exit the shell")
-print("help        - Display this help")
-]],
-
-    -- Команда clear
-    ["/bin/clear"] = [[
--- clear - clear the terminal screen
-local gpu = component.gpu
-if gpu then
-  local w, h = gpu.getResolution()
-  gpu.fill(1, 1, w, h, " ")
-  gpu.set(1, 1, "")
-end
+    ["/etc/motd"] = [[
+Добро пожаловать в O/UNIX 0.1 (Onix)
+Unix-подобная ОС для OpenComputers
 ]]
   }
-  
+
   for path, content in pairs(utilities) do
     local file = io.open(path, "w")
     if file then
@@ -501,139 +321,52 @@ end
       file:close()
       print("   ✅ " .. path)
     else
-      print("   ❌ " .. path)
+      print("   ❌ Ошибка: " .. path)
     end
-  end
-end
-
--- Создание конфигурационных файлов
-local function createConfigFiles()
-  print("⚙️  Создаем конфигурационные файлы...")
-  
-  local configs = {
-    ["/etc/motd"] = [[
-Welcome to O/UNIX ]] .. Onix.version .. [[ (]] .. Onix.codename .. [[)
-A Unix-like operating system for OpenComputers
-]],
-
-    ["/etc/passwd"] = [[
-root:x:0:0:Root user:/root:/bin/osh
-user:x:1000:1000:Default user:/home/user:/bin/osh
-]],
-
-    ["/etc/hostname"] = [[
-onix
-]],
-
-    ["/home/user/.profile"] = [[
-echo "Welcome to O/UNIX, $USER!"
-]]
-  }
-  
-  for path, content in pairs(configs) do
-    local file = io.open(path, "w")
-    if file then
-      file:write(content)
-      file:close()
-      print("   ⚙️  " .. path)
-    end
-  end
-end
-
--- Установка загрузчика
-local function installBootloader()
-  print("🚀 Устанавливаем загрузчик...")
-  
-  local bootloader = [[
--- O/UNIX Bootloader
-local computer = require("computer")
-local filesystem = require("filesystem")
-
-print("Booting O/UNIX ]] .. Onix.version .. [[...")
-
--- Проверка файловой системы
-if not filesystem.exists("/etc/init.lua") then
-  print("ERROR: System files not found")
-  computer.beep(200, 1)
-  return
-end
-
--- Загрузка ядра
-local success, err = pcall(dofile, "/etc/init.lua")
-if not success then
-  print("Boot failed: " .. tostring(err))
-  computer.beep(200, 1)
-  return
-end
-
-print("O/UNIX started successfully")
-]]
-  
-  local bootFile = io.open("/boot.lua", "w")
-  if bootFile then
-    bootFile:write(bootloader)
-    bootFile:close()
-    print("   ✅ Загрузчик установлен")
   end
 end
 
 -- Основной процесс установки
 local function performInstallation()
-  print("\n🎯 Начинаем установку O/UNIX...")
-  print("========================================")
+  print("\nНачинаем установку O/UNIX...")
+  print("===============================")
   
   local issues = checkCompatibility()
   if #issues > 0 then
-    print("❌ Проблемы с совместимостью:")
+    print("Проблемы с совместимостью:")
     for _, issue in ipairs(issues) do
       print("   " .. issue)
     end
     return false
   end
   
-  print("✅ Система совместима!")
+  print("✅ Система совместима")
   
   createFilesystemStructure()
   installSystemUtilities()
-  createConfigFiles()
-  installBootloader()
   
   print("\n🎉 Установка O/UNIX завершена!")
-  print("========================================")
-  print("O/UNIX " .. Onix.version .. " (" .. Onix.codename .. ")")
+  print("===============================")
+  print("O/UNIX 0.1 (Onix)")
   print("")
-  print("Доступные команды:")
-  print("  ls, cd, pwd, cat, echo, mkdir, rm")
-  print("  cp, mv, ps, kill, whoami, date, uname")
+  print("Основные команды:")
+  print("  ls, pwd, cat, echo, mkdir, rm, date")
   print("  clear, help, exit")
   print("")
   print("Перезагрузите компьютер для запуска O/UNIX")
-  print("Используйте 'help' для списка команд")
-  
-  computer.beep(1000, 0.2)
-  computer.beep(1200, 0.2)
   
   return true
 end
 
--- Текстовый установщик
-local function showTextInstaller()
-  print("O/UNIX (Onix) Installer v" .. Onix.version)
-  print("========================================")
-  print("Unix-like OS for OpenComputers")
-  print("")
-  print("Это установит O/UNIX на ваш компьютер.")
-  print("Все существующие данные будут удалены!")
-  print("")
-  print("Продолжить? (y/n)")
-  
-  local answer = io.read()
-  if answer:lower() == "y" or answer:lower() == "yes" then
-    performInstallation()
-  else
-    print("❌ Установка отменена")
-  end
-end
-
 -- Запуск установщика
-showTextInstaller()
+print("O/UNIX Installer v0.1")
+print("=====================")
+
+print("Продолжить установку? (y/n)")
+local answer = io.read()
+
+if answer:lower() == "y" then
+  performInstallation()
+else
+  print("Установка отменена")
+end
