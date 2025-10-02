@@ -33,16 +33,12 @@ center("Boot from: " .. addr, math.floor(h / 2) - 1)
 gpu.setForeground(fg)
 center(loading, math.floor(h / 2) + 1)
 
--- 3) Progress bar (ASCII)
-local barW = 40
-local barX = math.floor((w - barW) / 2) + 1
-local barY = math.floor(h / 2) + 3
 
 for i = 1, barW do
   gpu.setBackground(bar)
   gpu.set(barX + i - 1, barY, "█")
   gpu.setBackground(bg)
-  os.sleep(0.05)
+  computer.pull(0.05)   -- sleep's alternative
 end
 
 -- Final splash
