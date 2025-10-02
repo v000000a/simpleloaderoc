@@ -76,7 +76,6 @@ local function installSystemUtilities()
   local utilities = {
     -- Системный загрузчик
     ["/boot/onix.boot"] = [[
-#!/bin/onix
 -- O/UNIX Bootloader
 print("Booting O/UNIX " .. _ONIX_VERSION .. "...")
 
@@ -91,12 +90,6 @@ _ONIX_VERSION = "]] .. Onix.version .. [["
 _ONIX_CODENAME = "]] .. Onix.codename .. [["
 
 -- Глобальные переменные системы
-os.setenv("PATH", "/bin:/usr/bin")
-os.setenv("HOME", "/home/user")
-os.setenv("USER", "user")
-os.setenv("SHELL", "/bin/osh")
-
--- Системные вызовы
 function os.setenv(name, value)
   _G["ENV_" .. name] = value
 end
@@ -108,6 +101,13 @@ end
 function os.export(name, value)
   os.setenv(name, value)
 end
+
+-- Установка переменных по умолчанию
+os.setenv("PATH", "/bin:/usr/bin")
+os.setenv("HOME", "/home/user")
+os.setenv("USER", "user")
+os.setenv("SHELL", "/bin/osh")
+os.setenv("PWD", "/")
 
 -- Менеджер процессов
 process = {
@@ -154,7 +154,8 @@ local function executeCommand(cmd, args)
       args = args,
       PATH = os.getenv("PATH"),
       USER = os.getenv("USER"),
-      HOME = os.getenv("HOME")
+      HOME = os.getenv("HOME"),
+      PWD = os.getenv("PWD")
     }
     
     local old_env = _G.ENV
@@ -203,7 +204,7 @@ end
     ["/bin/ls"] = [[
 -- ls - list directory contents
 local args = _G.ENV.args or {}
-local path = args[1] or "."
+local path = args[1] or _G.ENV.PWD or "."
 
 if not filesystem.exists(path) then
   print("ls: cannot access '" .. path .. "': No such file or directory")
