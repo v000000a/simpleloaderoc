@@ -1,4 +1,4 @@
--- Recovery Menu 2025 (4/5) — follows OC 1.8.3 docs
+-- Recovery Menu 2025 (4.5/5) — full disk manager + confirm dialogs
 local component = require("component")
 local computer  = require("computer")
 local event     = require("event")
@@ -7,18 +7,19 @@ local w, h      = gpu.maxResolution()
 gpu.setResolution(w, h)
 gpu.fill(1, 1, w, h, " ")
 
--- System colours (modern 2025)
-local bg    = 0xF2F2F7
-local fg    = 0x000000
-local accent = 0x007AFF
-local red   = 0xFF3B30
-local green = 0x34C759
+-- System colours (2025 minimal)
+local bg      = 0xF2F2F7
+local fg      = 0x000000
+local accent  = 0x007AFF
+local red     = 0xFF3B30
+local green   = 0x34C759
+local gray    = 0x8E8E93
 
 gpu.setBackground(bg)
 gpu.setForeground(fg)
 gpu.fill(1, 1, w, h, " ")
 
--- GUI helpers (docs-compliant)
+-- GUI helpers
 local function center(text, y)
   local x = math.floor((w - #text) / 2) + 1
   gpu.set(x, y, text)
@@ -36,29 +37,77 @@ local function inside(px, py, btn)
          py >= btn.y and py <= btn.y + btn.h - 1
 end
 
--- Disk manager (uses component.invoke per docs)
-local function diskManager(addr)
+-- Disk list (docs: component.invoke)
+local function listDisks()
+  local disks = {}
+  for addr, _ in component.list("filesystem") do
+    table.insert(disks, {
+      addr  = addr,
+      label = component.invoke(addr, "getLabel") or "Unlabeled"
+    })
+  end
+  return disks
+end
+
+-- File manager GUI (browse + delete + confirm)
+local function fileManager(diskAddr)
   local path = "/"
   while true do
-    gpu.setBackground(0xF2F2F7); gpu.fill(1, 5, w, h - 5, " ")
-    center("Disk Manager: " .. path, 5)
-    local list = component.invoke(addr, "list", path)
+    gpu.setBackground(bg); gpu.fill(1, 5, w, h - 5, " ")
+    center("File Manager: " .. path, 5)
+
+    local list = component.invoke(diskAddr, "list", path)
     local y = 7
-    for name in list do
+    local items = {}
+    for name in list do table.insert(items, name) end
+
+    -- draw files/folders
+    for i, name in ipairs(items) do
       gpu.set(2, y, name); y = y + 1
     end
-    -- touch to exit (docs: event.pull)
-    local _, _, x, y = event.pull("touch")
-    if y > h - 3 then break end
+
+    -- bottom bar: Delete / Back / Wipe (with confirmation)
+    local btnDel  = button("Delete", 10, h - 6, 12, 2, red, 0xFFFFFF)
+    local btnBack = button("Back",   24, h - 6, 12, 2, gray, 0xFFFFFF)
+    local btnWipe = button("Wipe All", 38, h - 6, 12, 2, red, 0xFFFFFF)
+
+    while true do
+      local _, _, x, y = event.pull("touch")
+      if inside(x, y, btnBack) then
+        break  -- exit file manager
+      elseif inside(x, y, btnDel) then
+        -- delete single file (with confirm)
+        center("Tap a file to DELETE (or anywhere to cancel)", h - 4)
+        local _, _, x2, y2 = event.pull("touch")
+        local idx = y2 - 7
+        if idx >= 1 and idx <= #items then
+          local name = items[idx]
+          local confirm = prompt("Delete " .. name .. " ? (y/n)") or "n"
+          if confirm:lower() == "y" then
+            component.invoke(diskAddr, "remove", path .. name)
+            center("Deleted", h - 2)
+            os.sleep(0.3)
+          end
+        end
+        break
+      elseif inside(x, y, btnWipe) then
+        -- Wipe ALL (with confirm)
+        local confirm = prompt("Wipe entire disk? (y/n)") or "n"
+        if confirm:lower() == "y" then
+          wipeDisk(diskAddr)
+        end
+        break
+      end
+    end
   end
 end
 
--- Wipe disk (docs: remove("/"))
+-- Wipe entire disk (with confirm)
 local function wipeDisk(addr)
   center("Wiping " .. addr:sub(1, 8) .. "...", h - 2)
   component.invoke(addr, "remove", "/")
   center("Wiped!", h - 2)
-  computer.pull(0.5) -- docs: use computer.pull, not os.sleep
+  os.sleep(0.5)
 end
 
 -- Boot OpenOS (docs: loadfile + pcall)
@@ -69,8 +118,15 @@ local function bootOpenOS()
   end)
   if not ok then
     gpu.setForeground(red); center("Boot failed: " .. tostring(err), h - 2)
-    computer.pull(2); computer.shutdown(true)
+    os.sleep(2); computer.shutdown(true)
   end
+end
+
+-- Prompt helper (docs: prompt + pull)
+local function prompt(question)
+  center(question, h - 4)
+  local _, _, answer = event.pull("key")
+  return string.char(answer)
 end
 
 -- Main menu (docs: touch + pull)
@@ -87,7 +143,7 @@ local function mainMenu()
     while true do
       local _, _, x, y = event.pull("touch")
       if inside(x, y, btn1) then
-        local disks = listDisks(); if #disks > 0 then diskManager(disks[1].addr) end; break
+        local disks = listDisks(); if #disks > 0 then fileManager(disks[1].addr) end; break
       elseif inside(x, y, btn2) then
         local disks = listDisks(); if #disks > 0 then wipeDisk(disks[1].addr) end; break
       elseif inside(x, y, btn3) then
@@ -103,5 +159,5 @@ end
 local ok, err = pcall(mainMenu)
 if not ok then
   gpu.setForeground(red); center("CRASH: " .. tostring(err), 1)
-  computer.pull(3); computer.shutdown(true)
+  os.sleep(3); computer.shutdown(true)
 end
